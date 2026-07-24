@@ -1,0 +1,130 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agentrepro.dev/schemas/bundle-manifest-1.json",
+  "title": "bundle-manifest/1",
+  "description": "Manifest schema for AgentRepro bundles. Every bundle contains exactly one manifest.json conforming to this schema.",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "$schema": { "type": "string", "description": "JSON Schema reference for this manifest." },
+    "manifest_version": {
+      "type": "string",
+      "pattern": "^1\\.[0-9]+$",
+      "description": "Bundle format version. Major 1 required; future additive minor fields allowed."
+    },
+    "bundle_id": {
+      "type": "string",
+      "pattern": "^bnd_[A-Za-z0-9_-]+$",
+      "description": "Globally unique opaque identifier for this bundle."
+    },
+    "generator": {
+      "type": "object",
+      "required": ["name", "version"],
+      "properties": {
+        "name": { "type": "string" },
+        "version": { "type": "string" },
+        "build_commit": { "type": ["string", "null"] }
+      },
+      "additionalProperties": false
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 UTC timestamp when the bundle was created."
+    },
+    "source": {
+      "type": "object",
+      "required": ["agent"],
+      "properties": {
+        "agent": {
+          "type": "string",
+          "enum": ["claude-code", "codex-cli", "opencode", "unknown", "none"],
+          "description": "Coding agent that produced the session."
+        },
+        "agent_version": { "type": ["string", "null"] },
+        "session_ref_status": {
+          "type": "string",
+          "enum": ["resolved", "unresolved", "not_provided"]
+        },
+        "incident_id": { "type": ["string", "null"] },
+        "incident_producer": { "type": ["string", "null"] }
+      },
+      "additionalProperties": false
+    },
+    "capabilities": {
+      "type": "object",
+      "properties": {
+        "session_excerpt": { "type": "boolean" },
+        "environment": { "type": "boolean" },
+        "git_state": { "type": "boolean" },
+        "evidence": { "type": "boolean" },
+        "incident": { "type": "boolean" },
+        "prepare_supported": { "type": "boolean" },
+        "exact_llm_replay": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
+    "redaction": {
+      "type": "object",
+      "properties": {
+        "policy_version": { "type": "string" },
+        "applied": { "type": "boolean" },
+        "total_replacements": { "type": "integer", "minimum": 0 },
+        "unresolved_high_confidence": { "type": "integer", "minimum": 0 },
+        "hard_deny_overrides": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "limits": {
+      "type": "object",
+      "properties": {
+        "max_file_bytes": { "type": "integer" },
+        "max_bundle_bytes": { "type": "integer" },
+        "actual_payload_bytes": { "type": "integer" }
+      },
+      "additionalProperties": false
+    },
+    "reproduction": {
+      "type": "object",
+      "properties": {
+        "classification": {
+          "type": "string",
+          "enum": ["inspection_only", "partial", "exact_candidate"]
+        },
+        "baseline_commit": { "type": ["string", "null"] },
+        "reasons_not_exact": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "files": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["path", "role", "bytes", "sha256"],
+        "properties": {
+          "path": { "type": "string" },
+          "role": {
+            "type": "string",
+            "enum": [
+              "schema", "incident", "session", "session_metadata",
+              "environment", "git_state", "evidence_index", "evidence",
+              "redaction_report", "reproduce"
+            ]
+          },
+          "media_type": { "type": "string" },
+          "bytes": { "type": "integer", "minimum": 0 },
+          "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+        },
+        "additionalProperties": false
+      },
+      "uniqueItems": true
+    }
+  },
+  "required": [
+    "manifest_version", "bundle_id", "generator", "created_at",
+    "source", "capabilities", "files"
+  ]
+}

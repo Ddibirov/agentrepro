@@ -1,0 +1,16 @@
+[project]
+name = "agentrepro"
+version = "0.1.0"
+description = "Coding agent incident reproduction bundles — collect, redact, verify"
+requires-python = ">=3.11"
+dependencies = [
+    "jsonschema>=4.0",
+    "zstandard>=0.22",
+]
+
+[project.scripts]
+agentrepro = "agentrepro.cli:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
