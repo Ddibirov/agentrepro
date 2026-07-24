@@ -12,7 +12,6 @@ from pathlib import Path
 
 from agentrepro.bundle.reader import BundleReader
 from agentrepro.bundle.verify import BundleVerify
-from agentrepro.errors import PrepareError
 
 
 def cmd_prepare(

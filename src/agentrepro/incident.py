@@ -6,12 +6,10 @@ Matches spec §6: validates version, project known fields, adds import metadata.
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from agentrepro.errors import SchemaError
-from agentrepro.schema.validator import validate_against_schema
 
 
 # Known optional (forward-compatible) field names that ARE copied to projection.

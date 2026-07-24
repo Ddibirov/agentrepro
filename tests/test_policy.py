@@ -1,7 +1,6 @@
 """Tests for collection policy (hard-deny, safe path resolution)."""
 from __future__ import annotations
 
-from pathlib import Path
 
 import pytest
 

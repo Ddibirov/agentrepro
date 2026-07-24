@@ -7,7 +7,6 @@ from pathlib import Path
 
 import pytest
 
-from agentrepro.bundle.verify import BundleVerify
 from agentrepro.bundle.writer import BundleWriter
 from agentrepro.prepare import cmd_prepare
 
@@ -142,7 +141,8 @@ def test_prepare_bundle_without_git_state(tmp_path, git_repo_with_commit):
 
 def test_prepare_bundle_verify_failure(tmp_path, git_repo_with_commit):
     """Prepare should reject bundles that fail strict verify."""
-    import tarfile, io
+    import tarfile
+    import io
 
     bad_bundle = tmp_path / "bad.tar"
     with tarfile.open(bad_bundle, "w") as tar:

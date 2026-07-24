@@ -14,10 +14,10 @@ from pathlib import Path
 from typing import Any
 
 from .adapters import get_adapter, NormalizedSession
-from .bundle.models import Manifest, ManifestFile, ManifestSource, ManifestCapabilities
+from .bundle.models import Manifest, ManifestFile, ManifestCapabilities
 from .bundle.verify import BundleVerify
 from .bundle.writer import BundleWriter
-from .errors import ConfirmationError, PolicyError, SourceError
+from .errors import SourceError
 from .incident import IncidentImporter
 from .redaction.engine import RedactionEngine
 from .redaction.filters import reset_placeholder_cache
@@ -58,8 +58,6 @@ def _collect_payload(
     source_info: dict[str, Any] = {}
     caps = ManifestCapabilities()
     reproduction_info: dict[str, Any] = {}
-    file_list: list[ManifestFile] = []
-
     if incident_path:
         # Incident-driven capture
         importer = IncidentImporter(incident_path).load().project()
@@ -408,7 +406,7 @@ def cmd_capture(
         print(f"\nBundle created: {result_path}")
         print(f"  Size: {result_path.stat().st_size} bytes")
         print(f"  Redactions: {redaction_info['total_replacements']}")
-        print(f"  Verification: PASSED")
+        print("  Verification: PASSED")
 
     return 0
 

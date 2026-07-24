@@ -12,7 +12,6 @@ from enum import Enum
 from typing import Any
 
 from .engine import FileResult
-from .report import RedactionReport
 
 
 class RiskLevel(Enum):

@@ -6,7 +6,6 @@ from pathlib import Path
 
 import pytest
 
-from agentrepro.bundle.models import Manifest, ManifestFile
 from agentrepro.bundle.reader import BundleReader, validate_tar_header_safety
 from agentrepro.bundle.verify import BundleVerify
 from agentrepro.bundle.writer import BundleWriter
@@ -71,7 +70,8 @@ def test_verify_bad_checksum(tmp_path):
     result = w.write()
 
     # Read the uncompressed tar, modify one byte in session.jsonl, re-write
-    import tarfile, io
+    import tarfile
+    import io
     members = {}
     with tarfile.open(result, "r:") as tar:
         for m in tar.getmembers():
@@ -103,7 +103,8 @@ def test_verify_bad_checksum(tmp_path):
 
 def test_verify_missing_member(tmp_path):
     """Verify detects missing manifest."""
-    import tarfile, io
+    import tarfile
+    import io
     bad = tmp_path / "bad.tar"
     # Write a tar without manifest.json
     with tarfile.open(bad, "w") as tar:
@@ -120,7 +121,8 @@ def test_verify_missing_member(tmp_path):
 
 def test_tar_header_safety(tmp_path):
     """Reader rejects dangerous tar members."""
-    import tarfile, io
+    import tarfile
+    import io
 
     # Test traversal
     bad = tmp_path / "traversal.tar"
@@ -140,7 +142,8 @@ def test_tar_header_safety(tmp_path):
 
 
 def test_tar_header_safety_duplicate(tmp_path):
-    import tarfile, io
+    import tarfile
+    import io
     bad = tmp_path / "dup.tar"
     with tarfile.open(bad, "w") as tar:
         for _ in range(2):
@@ -155,7 +158,8 @@ def test_tar_header_safety_duplicate(tmp_path):
 
 
 def test_tar_header_safety_absolute(tmp_path):
-    import tarfile, io
+    import tarfile
+    import io
     bad = tmp_path / "abs.tar"
     with tarfile.open(bad, "w") as tar:
         info = tarfile.TarInfo(name="/etc/passwd")

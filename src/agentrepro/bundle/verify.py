@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from agentrepro.schema.validator import validate_against_schema
-from .models import Manifest, ManifestFile, validate_manifest_structure
+from .models import Manifest, validate_manifest_structure
 from .reader import (
     BundleReader,
     validate_tar_header_safety,

@@ -5,9 +5,6 @@ from agentrepro.bundle.models import (
     Manifest,
     ManifestFile,
     ManifestSource,
-    ManifestCapabilities,
-    ManifestRedaction,
-    ManifestReproduction,
     validate_manifest_structure,
 )
 

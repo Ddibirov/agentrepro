@@ -11,9 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import io
-import json
 import os
-import secrets
 import shutil
 import tarfile
 import tempfile
@@ -131,12 +129,7 @@ class BundleWriter:
         checksum_text = "\n".join(checksum_lines) + "\n"
         checksum_bytes = checksum_text.encode("utf-8")
 
-        checksum_entry = ManifestFile(
-            path="checksums.txt",
-            role="schema",
-            bytes=len(checksum_bytes),
-            sha256=self._sha256(checksum_bytes),
-        )
+        # checksums.txt exists in the bundle but NOT in manifest.files per spec §5.1
         file_contents["checksums.txt"] = checksum_bytes
 
         # ---- Phase 3: manifest.files = data_entries ONLY ----
@@ -275,7 +268,7 @@ class BundleWriter:
                 assert len(arc_path.encode("utf-8")) <= 240, f"Tar name too long: {arc_path}"
                 assert ".." not in arc_path.split("/"), f"Path traversal: {arc_path}"
                 assert not arc_path.startswith("/"), f"Absolute path: {arc_path}"
-                assert arc_path, f"Empty path"
+                assert arc_path, "Empty path"
 
                 info = tarfile.TarInfo(name=arc_path)
                 info.size = len(content)

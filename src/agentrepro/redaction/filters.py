@@ -9,7 +9,7 @@ from __future__ import annotations
 import re
 import secrets
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import ClassVar
 
 from .patterns import DEFAULT_REGISTRY, PatternDef, PatternRegistry

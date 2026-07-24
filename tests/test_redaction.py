@@ -1,17 +1,13 @@
 """Tests for redaction engine."""
 from __future__ import annotations
 
-import re
 
-import pytest
 
 from agentrepro.redaction.engine import RedactionEngine
 from agentrepro.redaction.filters import (
-    RedactionFilter,
     PLACEHOLDER_CACHE,
     reset_placeholder_cache,
 )
-from agentrepro.redaction.patterns import DEFAULT_REGISTRY, PatternDef, PatternRegistry
 from agentrepro.redaction.preview import PreviewReport
 from agentrepro.redaction.report import RedactionReport
 
