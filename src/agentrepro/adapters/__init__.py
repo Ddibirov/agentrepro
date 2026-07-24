@@ -5,13 +5,15 @@ Base adapter interface and concrete implementations for Claude Code and Codex CL
 
 from __future__ import annotations
 
+import logging
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
-from datetime import datetime
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from agentrepro.errors import SourceError
+
+logger = logging.getLogger(__name__)
 
 
 ###############################################################################
@@ -182,6 +184,7 @@ class ClaudeAdapter(SessionAdapter):
                 try:
                     event_count, first_event = self._peek_events(session_file)
                 except Exception:
+                    logger.warning("Failed to peek events in %s", session_file, exc_info=True)
                     continue
 
                 cwd = first_event.get("cwd") if first_event else None
@@ -272,7 +275,6 @@ class ClaudeAdapter(SessionAdapter):
                         for block in content:
                             if isinstance(block, dict):
                                 if block.get("type") == "tool_result":
-                                    tool_id = block.get("tool_use_id", "")
                                     tool_name = block.get("name", "unknown")
                                     tool_output = ""
                                     exit_code = None
@@ -417,17 +419,16 @@ class CodexAdapter(SessionAdapter):
                         try:
                             meta = self._peek_meta(session_file)
                         except Exception:
+                            logger.warning("Failed to peek meta in %s", session_file, exc_info=True)
                             continue
 
                         if meta:
                             cwd = meta.get("payload", {}).get("cwd")
                             agent_ver = meta.get("payload", {}).get("cli_version")
-                            originator = meta.get("payload", {}).get("originator")
                             start_ts = meta.get("timestamp") or session_file.stat().st_mtime
                         else:
                             cwd = None
                             agent_ver = None
-                            originator = None
                             start_ts = session_file.stat().st_mtime
 
                         sessions.append(SessionDescriptor(
