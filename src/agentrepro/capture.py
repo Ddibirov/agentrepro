@@ -25,59 +25,55 @@ from .redaction.preview import PreviewReport
 from .redaction.report import RedactionReport
 from .reproduce import generate_reproduce_md
 
-
 CAPTURE_AGENTS = {"claude", "claude-code", "codex", "codex-cli"}
 
 
-def cmd_capture(
+# ---------------------------------------------------------------------------
+# Public helpers (shared with preview, etc.)
+# ---------------------------------------------------------------------------
+
+
+def _collect_payload(
     *,
-    source_selector: str,  # "last", session ID, or incident path
+    source_selector: str,
     agent: str | None = None,
-    output: str | None = None,
-    yes: bool = False,
     incident_path: str | None = None,
     evidence_paths: list[str] | None = None,
-    format: str = "text",
-) -> int:
-    """Execute a capture workflow per spec §9.
+) -> tuple[
+    dict[str, tuple[bytes, str]],  # payload (archive_path -> (bytes, role))
+    list[ManifestFile],            # files_meta
+    ManifestCapabilities,          # caps
+    dict[str, Any],                # source_info
+    IncidentImporter | None,       # incident_importer
+    dict[str, Any] | None,         # git_state
+    dict[str, Any],                # reproduction_info
+]:
+    """Collect all payload data for a capture or preview.
 
-    Returns exit code.
+    Returns (payload, files_meta, caps, source_info, incident_importer,
+             git_state, reproduction_info).
     """
-    # Resolve source
     session_data: NormalizedSession | None = None
-    incident_importer: IncidentImporter | None = None
+    importer: IncidentImporter | None = None
     source_info: dict[str, Any] = {}
     caps = ManifestCapabilities()
-    redaction_info: dict[str, Any] = {}
     reproduction_info: dict[str, Any] = {}
-    limits_info: dict[str, Any] = {}
     file_list: list[ManifestFile] = []
-
-    reset_placeholder_cache()
 
     if incident_path:
         # Incident-driven capture
-        try:
-            importer = IncidentImporter(incident_path).load().project()
-            incident_importer = importer
-        except Exception as e:
-            msg = f"Error loading incident: {e}"
-            if format == "json":
-                print(json.dumps({"error": msg, "code": "E_INCIDENT"}))
-            else:
-                print(msg, file=sys.stderr)
-            return 4
+        importer = IncidentImporter(incident_path).load().project()
 
         source_info = {
-            "agent": agent or incident_importer.get_agent() or "unknown",
-            "agent_version": incident_importer.get_agent_version(),
+            "agent": agent or importer.get_agent() or "unknown",
+            "agent_version": importer.get_agent_version(),
             "session_ref_status": "unresolved",
-            "incident_id": incident_importer.get_incident_id(),
-            "incident_producer": incident_importer.get_producer(),
+            "incident_id": importer.get_incident_id(),
+            "incident_producer": importer.get_producer(),
         }
 
         # Try to resolve session from incident
-        session_ref = incident_importer.get_session_ref()
+        session_ref = importer.get_session_ref()
         if session_ref:
             try:
                 adp = get_adapter(source_info["agent"])
@@ -95,45 +91,31 @@ def cmd_capture(
         # Agent-driven capture
         agent = agent.lower()
         if agent not in CAPTURE_AGENTS:
-            msg = f"Unknown agent: {agent}. Use one of: {sorted(CAPTURE_AGENTS)}"
-            if format == "json":
-                print(json.dumps({"error": msg, "code": "E_USAGE"}))
-            else:
-                print(msg, file=sys.stderr)
-            return 2
+            raise SourceError(
+                f"Unknown agent: {agent}. Use one of: {sorted(CAPTURE_AGENTS)}",
+                code="E_USAGE",
+            )
 
-        try:
-            adp = get_adapter(agent)
-            descriptors = adp.discover(source_selector)
-            if not descriptors:
-                msg = f"No sessions found for '{source_selector}' using {agent}"
-                if format == "json":
-                    print(json.dumps({"error": msg, "code": "E_SOURCE"}))
-                else:
-                    print(msg, file=sys.stderr)
-                return 3
-            descriptor = descriptors[0]
-            session_data = adp.read_normalized(descriptor)
-            source_info = {
-                "agent": adp.agent_name,
-                "agent_version": descriptor.agent_version,
-                "session_ref_status": "resolved",
-            }
-            caps.session_excerpt = True
-        except SourceError as e:
-            if format == "json":
-                print(json.dumps({"error": str(e), "code": e.code}))
-            else:
-                print(str(e), file=sys.stderr)
-            return 3
-
+        adp = get_adapter(agent)
+        descriptors = adp.discover(source_selector)
+        if not descriptors:
+            raise SourceError(
+                f"No sessions found for '{source_selector}' using {agent}",
+                code="E_SOURCE",
+            )
+        descriptor = descriptors[0]
+        session_data = adp.read_normalized(descriptor)
+        source_info = {
+            "agent": adp.agent_name,
+            "agent_version": descriptor.agent_version,
+            "session_ref_status": "resolved",
+        }
+        caps.session_excerpt = True
     else:
-        msg = "Either --incident or --agent with --session/--last is required"
-        if format == "json":
-            print(json.dumps({"error": msg, "code": "E_USAGE"}))
-        else:
-            print(msg, file=sys.stderr)
-        return 2
+        raise SourceError(
+            "Either --incident or --agent with --session/--last is required",
+            code="E_USAGE",
+        )
 
     # ---- Build payload ----
     payload: dict[str, tuple[bytes, str]] = {}
@@ -156,8 +138,8 @@ def cmd_capture(
         files_meta.append(ManifestFile(path="session-metadata.json", role="session_metadata", bytes=len(meta_json)))
 
     # Incident projection
-    if incident_importer:
-        inc_json = json.dumps(incident_importer.projected, indent=2, ensure_ascii=False)
+    if importer:
+        inc_json = json.dumps(importer.projected, indent=2, ensure_ascii=False)
         payload["incident.json"] = (inc_json.encode("utf-8"), "incident")
         files_meta.append(ManifestFile(path="incident.json", role="incident", bytes=len(inc_json)))
 
@@ -200,10 +182,22 @@ def cmd_capture(
             payload["evidence/index.json"] = (idx_json.encode("utf-8"), "evidence_index")
             files_meta.append(ManifestFile(path="evidence/index.json", role="evidence_index", bytes=len(idx_json)))
 
-    # ---- Redaction ----
-    redaction_info = {"policy_version": "1.0", "applied": False, "total_replacements": 0, "unresolved_high_confidence": 0, "hard_deny_overrides": 0}
+    return payload, files_meta, caps, source_info, importer, git_state, reproduction_info
 
-    engine = RedactionEngine()
+
+def _run_redaction(
+    payload: dict[str, tuple[bytes, str]],
+) -> tuple[
+    dict[str, tuple[bytes, str]] | None,  # redacted payload
+    dict[str, Any],                        # redaction_info
+    list,                                   # file_results
+    RedactionReport | None,                # report
+]:
+    """Run redaction pipeline over payload files.
+
+    Returns (redacted_payload, redaction_info, file_results, report).
+    If no text payloads, returns (None, defaults, [], None).
+    """
     text_payloads: dict[str, str] = {}
     for arc_path, (content_bytes, role) in payload.items():
         try:
@@ -211,32 +205,97 @@ def cmd_capture(
         except UnicodeDecodeError:
             pass
 
-    if text_payloads:
-        redacted, file_results = engine.redact_files(text_payloads)
-        for arc_path, content in redacted.items():
-            payload[arc_path] = (content.encode("utf-8"), payload[arc_path][1])
+    if not text_payloads:
+        return None, {
+            "policy_version": "1.0", "applied": False, "total_replacements": 0,
+            "unresolved_high_confidence": 0, "hard_deny_overrides": 0,
+        }, [], None
 
-        total_reds = sum(fr.total_changes for fr in file_results)
-        high_conf = sum(fr.high_confidence_count() for fr in file_results)
-        redaction_info = {
-            "policy_version": "1.0",
-            "applied": total_reds > 0,
-            "total_replacements": total_reds,
-            "unresolved_high_confidence": 0,  # All successfully replaced
-            "hard_deny_overrides": 0,
-        }
+    engine = RedactionEngine()
+    redacted, file_results = engine.redact_files(text_payloads)
 
-        # Redaction report
-        report = RedactionReport.from_file_results(file_results)
-        report_json = report.to_json()
-        payload["redaction-report.json"] = (report_json.encode("utf-8"), "redaction_report")
-        files_meta.append(ManifestFile(path="redaction-report.json", role="redaction_report", bytes=len(report_json)))
-    else:
-        file_results = []
+    redacted_payload: dict[str, tuple[bytes, str]] = {}
+    for arc_path, content in redacted.items():
+        redacted_payload[arc_path] = (content.encode("utf-8"), payload[arc_path][1])
 
-    # ---- Preview ----
+    total_reds = sum(fr.total_changes for fr in file_results)
+    redaction_info: dict[str, Any] = {
+        "policy_version": "1.0",
+        "applied": total_reds > 0,
+        "total_replacements": total_reds,
+        "unresolved_high_confidence": 0,
+        "hard_deny_overrides": 0,
+    }
+
+    report = RedactionReport.from_file_results(file_results)
+    report_json = report.to_json()
+    redacted_payload["redaction-report.json"] = (report_json.encode("utf-8"), "redaction_report")
+
+    return redacted_payload, redaction_info, file_results, report
+
+
+def _build_preview(file_results) -> PreviewReport:
+    """Build a preview report from file_results."""
     preview = PreviewReport.from_file_results(file_results)
     preview.hard_deny_blocks = 0
+    return preview
+
+
+# ---------------------------------------------------------------------------
+# Main capture command
+# ---------------------------------------------------------------------------
+
+
+def cmd_capture(
+    *,
+    source_selector: str,  # "last", session ID, or incident path
+    agent: str | None = None,
+    output: str | None = None,
+    yes: bool = False,
+    incident_path: str | None = None,
+    evidence_paths: list[str] | None = None,
+    format: str = "text",
+) -> int:
+    """Execute a capture workflow per spec §9.
+
+    Returns exit code.
+    """
+    reset_placeholder_cache()
+
+    # Resolve source and collect payload
+    try:
+        payload, files_meta, caps, source_info, incident_importer, git_state, reproduction_info = _collect_payload(
+            source_selector=source_selector,
+            agent=agent,
+            incident_path=incident_path,
+            evidence_paths=evidence_paths,
+        )
+    except SourceError as e:
+        if format == "json":
+            print(json.dumps({"error": str(e), "code": e.code}))
+        else:
+            print(str(e), file=sys.stderr)
+        return e.exit_code
+    except Exception as e:
+        msg = f"Error loading source: {e}"
+        if format == "json":
+            print(json.dumps({"error": msg, "code": "E_SOURCE"}))
+        else:
+            print(msg, file=sys.stderr)
+        return 3
+
+    # ---- Redaction ----
+    redacted_payload, redaction_info, file_results, report = _run_redaction(payload)
+    if redacted_payload:
+        payload.update(redacted_payload)
+
+    # Add redaction-report.json if redaction ran
+    if report is not None:
+        rr_path = "redaction-report.json"
+        files_meta.append(ManifestFile(path=rr_path, role="redaction_report", bytes=len(report.to_json())))
+
+    # ---- Preview ----
+    preview = _build_preview(file_results)
 
     if format == "text":
         print(preview.format())
@@ -282,7 +341,6 @@ def cmd_capture(
     writer.add_schema(Path(__file__).resolve().parent.parent.parent / "schemas")
 
     # ---- Capability for guide ----
-    # Determine prepare_supported: true only if we have git commit
     caps.prepare_supported = caps.git_state
 
     # Reproduction classification
@@ -313,7 +371,7 @@ def cmd_capture(
             capabilities=caps.to_dict(),
             redaction_info=redaction_info,
             reproduction_info=reproduction_info,
-            limits_info=limits_info,
+            limits_info={},
         )
     except Exception as e:
         msg = f"Bundle write failed: {e}"
@@ -327,7 +385,6 @@ def cmd_capture(
     verifier = BundleVerify(strict=False)
     verify_result = verifier.verify(result_path)
     if not verify_result.valid:
-        # Check if only REPRODUCE.md warning
         errors = [i for i in verify_result.issues if i.severity == "error"]
         if errors:
             msg = f"Self-verify failed: {verify_result.summary()}"
@@ -356,6 +413,11 @@ def cmd_capture(
     return 0
 
 
+# ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
+
+
 def _collect_safe_environment() -> dict[str, Any]:
     """Collect minimal, safe environment info. No env vars, secrets."""
     import platform
@@ -375,7 +437,6 @@ def _collect_git_state(cwd_hint: str | None) -> dict[str, Any] | None:
     cwd = cwd_hint or os.getcwd()
 
     try:
-        # Check if git repo
         subprocess.run(
             ["git", "rev-parse", "--git-dir"],
             cwd=cwd, capture_output=True, timeout=5,

@@ -45,7 +45,7 @@ def cmd_verify(args) -> int:
                 for i in result.issues
             ],
         }, indent=2))
-        return 0 if result.valid else 1
+        return _verify_exit_code(result)
 
     print(f"Bundle: {Path(args.bundle).name}")
     print(f"Result: {result.summary()}")
@@ -74,7 +74,31 @@ def cmd_verify(args) -> int:
                 print(f"  [{i_.code}] {i_.message}")
             print()
 
-    return 0 if result.valid else 1
+    return _verify_exit_code(result)
+
+
+def _verify_exit_code(result) -> int:
+    """Map verify result to spec-compliant exit code.
+
+    Spec §9: 0=OK, 7=E_ARCHIVE, 8=E_INTEGRITY, 1=unexpected.
+    """
+    if result.valid:
+        return 0
+
+    has_archive = any(
+        i.code and i.code.startswith("ARCHIVE_")
+        for i in result.issues if i.severity == "error"
+    )
+    has_integrity = any(
+        i.code and i.code.startswith(("CHECKSUM_", "INTEGRITY_", "REQUIRED_MISSING", "HARD_DENY", "RESIDUAL_SECRET", "MANIFEST_"))
+        for i in result.issues if i.severity == "error"
+    )
+
+    if has_archive:
+        return 7  # E_ARCHIVE
+    if has_integrity:
+        return 8  # E_INTEGRITY
+    return 1  # General error
 
 
 def cmd_redact_test(args) -> int:
@@ -137,20 +161,54 @@ def cmd_redact_test(args) -> int:
 def cmd_preview(args) -> int:
     """Preview redaction results for a capture source.
 
-    Delegates capture logic but doesn't write final bundle.
+    Runs the same policy/redaction pipeline as capture but does NOT
+    write a bundle. Shows inventory, redaction counts, and risk level.
+    Never exposes original values. Matches spec §8.4.
     """
-    from .capture import cmd_capture
+    from .capture import _collect_payload, _run_redaction, _build_preview
 
-    # Re-use capture's logic but in preview-only mode
-    return cmd_capture(
-        source_selector=args.session if args.session else "last",
-        agent=args.agent,
-        output="/dev/null",  # No output
-        yes=True,  # Skip confirmation for preview
-        incident_path=args.incident,
-        evidence_paths=args.evidence,
-        format=args.format,
-    )
+    source_selector: str = "last"
+    incident_path: str | None = None
+    agent: str | None = args.agent
+
+    if args.last:
+        source_selector = "last"
+    elif args.session:
+        source_selector = args.session
+    elif args.incident:
+        incident_path = args.incident
+    else:
+        print("Error: one of --last, --session, or --incident is required", file=sys.stderr)
+        return 2
+
+    # Collect payload (same code path as capture)
+    try:
+        payload, files_meta, caps, source_info, incident_importer, git_state, reproduction_info = _collect_payload(
+            source_selector=source_selector,
+            agent=agent,
+            incident_path=incident_path,
+            evidence_paths=getattr(args, "evidence", None),
+        )
+    except Exception as e:
+        print(f"Error collecting data: {e}", file=sys.stderr)
+        return 3
+
+    # Run redaction
+    redacted_payload, redaction_info, file_results, report = _run_redaction(payload)
+    if redacted_payload:
+        payload = redacted_payload
+
+    # Build preview
+    preview = _build_preview(file_results)
+
+    if args.format == "json":
+        print(json.dumps(preview.to_dict(), indent=2))
+    else:
+        print(preview.format())
+
+    if preview.export_blocked:
+        return 5  # E_POLICY
+    return 0
 
 
 def cmd_capture_cli(args) -> int:
@@ -185,107 +243,14 @@ def cmd_prepare(args) -> int:
     Requires --repo (local existing repo) and --dir (empty/non-existent target).
     Does NOT modify the current working tree.
     """
-    import subprocess
+    from .prepare import cmd_prepare as _prepare_impl
 
-    repo = Path(args.repo).resolve()
-    target = Path(args.dir).resolve()
-
-    # Verify bundle first
-    verifier = BundleVerify(strict=True)
-    verify_result = verifier.verify(args.bundle)
-    if not verify_result.valid:
-        print(f"Bundle verification failed. Prepare requires strict verification.", file=sys.stderr)
-        for i in verify_result.issues:
-            if i.severity == "error":
-                print(f"  [{i.code}] {i.message}", file=sys.stderr)
-        return 9
-
-    # Validate repo
-    if not repo.is_dir():
-        print(f"Error: --repo must be an existing directory: {repo}", file=sys.stderr)
-        return 9
-
-    if not (repo / ".git").is_dir():
-        print(f"Error: --repo is not a Git repository: {repo}", file=sys.stderr)
-        return 9
-
-    # Validate target
-    if target.exists():
-        if any(target.iterdir()):
-            print(f"Error: --dir must be empty or non-existent: {target}", file=sys.stderr)
-            return 9
-    else:
-        target.mkdir(parents=True, exist_ok=True)
-
-    # Read git-state from bundle
-    try:
-        with BundleReader(args.bundle) as reader:
-            git_state = reader.read_json("git-state.json")
-    except Exception as e:
-        print(f"Cannot read git-state from bundle: {e}", file=sys.stderr)
-        return 9
-
-    baseline_commit = (git_state or {}).get("commit", "")
-    if not baseline_commit:
-        print("Warning: bundle has no baseline commit; creating detached worktree at current HEAD.", file=sys.stderr)
-        baseline_commit = "HEAD"
-
-    # Record original repo state
-    try:
-        original_head = subprocess.run(
-            ["git", "rev-parse", "HEAD"],
-            cwd=repo, capture_output=True, timeout=10, text=True,
-        ).stdout.strip()
-    except Exception as e:
-        print(f"Cannot determine original HEAD: {e}", file=sys.stderr)
-        return 9
-
-    try:
-        # Verify baseline commit exists in repo
-        subprocess.run(
-            ["git", "cat-file", "-e", baseline_commit],
-            cwd=repo, capture_output=True, timeout=10,
-            check=True,
-        )
-    except Exception:
-        print(f"Baseline commit not found in repo: {baseline_commit}", file=sys.stderr)
-        return 9
-
-    try:
-        # Create detached worktree (fixed argv, no shell)
-        subprocess.run(
-            ["git", "worktree", "add", "--detach", str(target), baseline_commit],
-            cwd=repo, capture_output=True, timeout=30,
-            check=True,
-        )
-    except subprocess.CalledProcessError as e:
-        print(f"Failed to create worktree: {e.stderr.decode() if e.stderr else e}", file=sys.stderr)
-        # Clean up target if created
-        if target.exists() and not any(target.iterdir()):
-            target.rmdir()
-        return 9
-
-    # Verify original repo is unchanged
-    try:
-        new_head = subprocess.run(
-            ["git", "rev-parse", "HEAD"],
-            cwd=repo, capture_output=True, timeout=10, text=True,
-        ).stdout.strip()
-        if new_head != original_head:
-            print(f"ERROR: Original repo HEAD changed! Was {original_head}, now {new_head}", file=sys.stderr)
-            return 9
-    except Exception:
-        pass
-
-    print(f"Worktree created at: {target}")
-    print(f"  Baseline commit: {baseline_commit}")
-    print()
-    print("Suggested commands from REPRODUCE.md (review before executing):")
-    print(f"  cd {target}")
-    print("  # Review bundle contents and follow REPRODUCE.md instructions")
-    print("  # Commands are NOT auto-executed per security policy")
-
-    return 0
+    return _prepare_impl(
+        bundle_path=args.bundle,
+        repo_path=args.repo,
+        dir_path=args.dir,
+        yes=args.yes,
+    )
 
 
 def main() -> int:

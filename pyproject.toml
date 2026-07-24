@@ -11,6 +11,14 @@ dependencies = [
 [project.scripts]
 agentrepro = "agentrepro.cli:main"
 
+[project.optional-dependencies]
+dev = [
+    "ruff>=0.5",
+]
+test = [
+    "pytest>=8.0",
+]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
