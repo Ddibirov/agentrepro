@@ -8,6 +8,10 @@ dependencies = [
     "zstandard>=0.22",
 ]
 
+[project.urls]
+Repository = "https://github.com/Ddibirov/agentrepro"
+BugTracker = "https://github.com/Ddibirov/agentrepro/issues"
+
 [project.scripts]
 agentrepro = "agentrepro.cli:main"
 
