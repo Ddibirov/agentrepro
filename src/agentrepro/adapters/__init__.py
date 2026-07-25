@@ -13,6 +13,8 @@ from typing import Any
 
 from agentrepro.errors import SourceError
 
+from .opencode import OpenCodeAdapter
+
 logger = logging.getLogger(__name__)
 
 
@@ -631,6 +633,8 @@ ADAPTERS: dict[str, type[SessionAdapter]] = {
     "claude-code": ClaudeAdapter,
     "codex": CodexAdapter,
     "codex-cli": CodexAdapter,
+    "opencode": OpenCodeAdapter,
+    "opencode-cli": OpenCodeAdapter,
 }
 
 
