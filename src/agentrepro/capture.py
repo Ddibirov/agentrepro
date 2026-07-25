@@ -25,7 +25,7 @@ from .redaction.preview import PreviewReport
 from .redaction.report import RedactionReport
 from .reproduce import generate_reproduce_md
 
-CAPTURE_AGENTS = {"claude", "claude-code", "codex", "codex-cli", "opencode", "opencode-cli"}
+CAPTURE_AGENTS = {"claude", "claude-code", "codex", "codex-cli", "hermes", "hermes-cli", "opencode", "opencode-cli"}
 
 
 # ---------------------------------------------------------------------------
